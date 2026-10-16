@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GitHub PR Notifier</title>
+  <link rel="stylesheet" href="css/common.css">
+  <link rel="stylesheet" href="css/popup.css">
+</head>
+<body data-page="popup">
+  <header class="popup-header">
+    <span id="logo" class="logo"></span>
+    <h1>Pull requests <span id="total" class="count">0</span></h1>
+    <span id="last-updated" class="muted"></span>
+    <button id="refresh" class="icon-btn" title="Refresh now" aria-label="Refresh now"></button>
+    <button id="settings" class="icon-btn" title="Settings" aria-label="Settings"></button>
+  </header>
+  <main id="content"></main>
+  <script type="module" src="js/popup.js"></script>
+</body>
+</html>

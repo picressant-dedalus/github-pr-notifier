@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>GitHub PR Notifier — Settings</title>
+  <link rel="stylesheet" href="css/common.css">
+  <link rel="stylesheet" href="css/options.css">
+</head>
+<body data-page="options">
+  <main class="options">
+    <h1><img src="img/icon48.png" alt="" width="28" height="28"> GitHub PR Notifier — Settings</h1>
+
+    <form id="options-form" novalidate>
+      <section>
+        <label for="org">Organisation</label>
+        <input id="org" name="org" type="text" placeholder="dedalus-cis4u" autocomplete="off" required>
+        <p class="hint">Used for repositories given by name only.</p>
+      </section>
+
+      <section>
+        <label for="repos">Repositories</label>
+        <textarea id="repos" name="repos" rows="8" spellcheck="false"
+          placeholder="orme-pharmacy&#10;other-org/other-repo&#10;https://github.com/dedalus-cis4u/orme-pharmacy"></textarea>
+        <p class="hint">One per line (spaces, commas or semicolons also work): <code>name</code>, <code>owner/name</code> or a GitHub URL. Text after <code>#</code> is ignored.
+          <span id="repos-count"></span></p>
+      </section>
+
+      <section>
+        <label for="token">GitHub personal access token</label>
+        <div class="row">
+          <input id="token" name="token" type="password" placeholder="ghp_…" autocomplete="off" spellcheck="false">
+          <button type="button" id="toggle-token" class="btn">Show</button>
+          <button type="button" id="test" class="btn">Test connection</button>
+        </div>
+        <p class="hint">
+          Classic token with the <code>repo</code> scope
+          (<a href="https://github.com/settings/tokens/new?scopes=repo&amp;description=GitHub%20PR%20Notifier" target="_blank" rel="noopener">create one</a>),
+          then <strong>Configure SSO → Authorize</strong> it for the organisation. Stored locally in this browser only.
+        </p>
+        <ul id="test-result" class="test-result" aria-live="polite"></ul>
+      </section>
+
+      <section class="grid">
+        <div>
+          <label for="refreshMinutes">Refresh interval (minutes)</label>
+          <input id="refreshMinutes" name="refreshMinutes" type="number" min="1" step="1">
+        </div>
+        <div>
+          <label for="badgeMinAgeDays">Count PRs older than (days)</label>
+          <input id="badgeMinAgeDays" name="badgeMinAgeDays" type="number" min="0" step="1">
+          <p class="hint">Toolbar counter only; <code>0</code> counts all PRs. The popup always lists every PR.</p>
+        </div>
+        <div>
+          <label for="adminTeamSlug">Mandatory reviewer team (flag icon)</label>
+          <input id="adminTeamSlug" name="adminTeamSlug" type="text" placeholder="cis4u-r-d-orbis-medication-admins" autocomplete="off">
+          <p class="hint">Team slug as written in CODEOWNERS, without <code>@org/</code>.</p>
+        </div>
+      </section>
+
+      <div class="actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <span id="status" class="status" role="status"></span>
+      </div>
+    </form>
+  </main>
+  <script type="module" src="js/options.js"></script>
+</body>
+</html>

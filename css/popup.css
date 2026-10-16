@@ -1,0 +1,85 @@
+body { width: 520px; max-height: 590px; }
+
+.popup-header {
+  position: sticky; top: 0; z-index: 1; display: flex; align-items: center; gap: 8px;
+  padding: 10px 12px; background: var(--bg-subtle); border-bottom: 1px solid var(--border);
+}
+.popup-header h1 { flex: 1; margin: 0; font-size: 15px; font-weight: 600; }
+.logo .octicon { width: 22px; height: 22px; }
+.icon-btn {
+  display: inline-flex; padding: 4px; border: 0; border-radius: 6px; background: transparent;
+  color: var(--muted); cursor: pointer;
+}
+.icon-btn:hover { background: #e6eaef; color: var(--fg); }
+.icon-btn.spinning .octicon { animation: spin 1s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#content { padding: 4px 12px 12px; }
+
+.not-configured { padding: 24px 8px; text-align: center; }
+
+.repo { margin-top: 10px; }
+.repo-header {
+  display: flex; align-items: center; gap: 8px; padding: 4px 0; cursor: pointer;
+  font-size: 14px; font-weight: 600; list-style: none;
+}
+.repo-header::-webkit-details-marker { display: none; }
+.repo-header::before { content: '▸'; color: var(--muted); transition: transform .15s; }
+.repo[open] > .repo-header::before { transform: rotate(90deg); }
+.repo-name { color: var(--fg); }
+.repo-empty { padding: 4px 18px; color: var(--muted); font-style: italic; }
+.repo-error {
+  display: flex; gap: 6px; align-items: center; margin: 4px 0; padding: 6px 8px; border-radius: 6px;
+  background: var(--danger-bg); color: var(--danger);
+}
+
+.pr-card {
+  margin: 6px 0; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg);
+}
+.pr-card:hover { border-color: #afb8c1; box-shadow: 0 1px 3px rgba(31, 35, 40, .08); }
+.pr-top { display: flex; align-items: flex-start; gap: 6px; }
+.pr-title { flex: 1; color: var(--fg); font-weight: 600; line-height: 1.35; word-break: break-word; }
+.pr-title:hover { color: var(--accent); }
+.pr-meta { display: flex; align-items: center; gap: 10px; margin: 4px 0 6px 22px; color: var(--muted); font-size: 12px; }
+.pr-author { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-weight: 500; }
+.avatar { width: 16px; height: 16px; border-radius: 50%; }
+.pr-age { display: inline-flex; align-items: center; gap: 3px; }
+.pr-age .octicon { width: 12px; height: 12px; }
+.pr-badges { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 22px; }
+
+.badge {
+  display: inline-flex; align-items: center; gap: 4px; padding: 1px 8px; border-radius: 2em;
+  border: 1px solid transparent; font-size: 12px; font-weight: 500; line-height: 18px;
+}
+.badge .octicon { width: 12px; height: 12px; }
+.badge-branch {
+  background: var(--grey-badge-bg); border-color: var(--border); color: var(--muted);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.badge-automerge-on { background: var(--success-bg); border-color: #4ac26b; color: var(--success); }
+.badge-automerge-off { background: var(--danger-bg); border-color: #ff8182; color: var(--danger); }
+
+.checks { flex: none; margin-top: 1px; }
+.checks-success { color: var(--success); }
+.checks-pending { color: var(--pending); }
+.checks-failure { color: var(--danger); }
+.checks-none { color: #c4ccd5; }
+
+.flag { flex: none; margin-top: 1px; }
+.flag-pending { color: var(--danger); }
+.flag-reviewed { color: var(--success); }
+
+/* Filter bar (only when "badge: only PRs older than N days" is set) */
+.filters { display: flex; gap: 4px; margin-top: 8px; padding: 3px; border-radius: 8px; background: var(--bg-subtle); border: 1px solid var(--border); }
+.filter {
+  flex: 1; display: inline-flex; justify-content: center; align-items: center; gap: 6px; padding: 4px 8px;
+  border: 0; border-radius: 6px; background: transparent; color: var(--muted); font: inherit; font-weight: 500; cursor: pointer;
+}
+.filter:hover { color: var(--fg); }
+.filter.active { background: var(--bg); color: var(--fg); box-shadow: 0 1px 2px rgba(31, 35, 40, .12); }
+.filter-old .count { background: #fff1c2; color: #7d4e00; }
+.all-recent { padding: 16px 8px; text-align: center; }
+
+/* PRs older than the configured number of days */
+.pr-old { border-left: 3px solid var(--pending); }
+.pr-age-old { color: #9a6700; font-weight: 600; }

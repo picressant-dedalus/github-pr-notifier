@@ -1,0 +1,22 @@
+.options { max-width: 720px; margin: 0 auto; padding: 24px; font-size: 14px; }
+.options h1 { display: flex; align-items: center; gap: 10px; font-size: 22px; font-weight: 600; }
+section { margin-bottom: 20px; }
+label { display: block; margin-bottom: 6px; font-weight: 600; }
+input[type="text"], input[type="password"], input[type="number"], textarea {
+  box-sizing: border-box; width: 100%; padding: 6px 10px; border: 1px solid var(--border); border-radius: 6px;
+  font: inherit; background: var(--bg);
+}
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 13px; resize: vertical; }
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.row { display: flex; gap: 8px; }
+.row input { flex: 1; }
+.grid { display: grid; grid-template-columns: 1fr 1fr 2fr; gap: 16px; }
+.hint { margin: 6px 0 0; color: var(--muted); font-size: 12px; }
+code { padding: 1px 4px; border-radius: 4px; background: var(--bg-subtle); font-size: 12px; }
+.actions { display: flex; align-items: center; gap: 12px; }
+.status { color: var(--success); }
+.status.error, #repos-count.error { color: var(--danger); }
+.test-result { margin: 8px 0 0; padding: 0; list-style: none; font-size: 13px; }
+.test-result li { padding: 2px 0; }
+.test-result .ok { color: var(--success); }
+.test-result .ko { color: var(--danger); }
