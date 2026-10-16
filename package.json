@@ -1,0 +1,33 @@
+{
+  "name": "github-pr-notifier",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Chrome extension (Manifest V3) listing open pull requests of a set of GitHub repositories, with a toolbar badge counting waiting PRs",
+  "scripts": {
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "icons": "node scripts/generate-icons.mjs",
+    "build": "./build.sh",
+    "e2e": "node scripts/e2e.mjs"
+  },
+  "jest": {
+    "testEnvironment": "jsdom",
+    "setupFilesAfterEnv": [
+      "<rootDir>/test/setup.js"
+    ],
+    "collectCoverageFrom": [
+      "js/**/*.js"
+    ]
+  },
+  "devDependencies": {
+    "@babel/core": "^7.29.7",
+    "@babel/preset-env": "^7.29.7",
+    "@primer/octicons": "^19.40.0",
+    "babel-jest": "^29.7.0",
+    "jest": "^29.7.0",
+    "jest-environment-jsdom": "^29.7.0",
+    "puppeteer-core": "^25.14.0",
+    "sharp": "^0.35.5"
+  }
+}

@@ -1,0 +1,7 @@
+dist/
+node_modules/
+coverage/
+.DS_Store
+.idea/
+# Screenshots contain internal PR data: generated locally by `npm run e2e`, never published
+docs/screenshots/
