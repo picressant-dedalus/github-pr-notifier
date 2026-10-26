@@ -17,6 +17,7 @@ Jenkinsfile* @dedalus-cis4u/cis4u-r-d-orbis-medication-admins
 
 export function prNode(overrides = {}) {
   return {
+    id: 'PR_node1',
     number: 1,
     title: 'feat: something',
     url: 'https://github.com/dedalus-cis4u/repo/pull/1',

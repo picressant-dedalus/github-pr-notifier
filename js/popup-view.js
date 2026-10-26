@@ -205,6 +205,63 @@ export function renderPopup(root, { settings, state, now = Date.now(), filter = 
   return { total, old, shown };
 }
 
+/** PRs shown by renderPopup for the given settings/state/filter (same filtering). */
+export function visiblePullRequests({ settings, state, now = Date.now(), filter = FILTER_ALL }) {
+  const minAgeDays = settings.badgeMinAgeDays || 0;
+  const old = minAgeDays > 0 && filter === FILTER_OLD;
+  const result = [];
+  for (const repo of settings.repos || []) {
+    const prs = (state.repos && state.repos[repo] && state.repos[repo].pullRequests) || [];
+    for (const pr of prs) if (!old || isOldEnough(pr, minAgeDays, now)) result.push({ ...pr, repo });
+  }
+  return result;
+}
+
+/** Pure selection/result rows. Candidate indexes are only local DOM keys, never PR identities. */
+export function renderApprovalRows(root, candidates, { results = false } = {}) {
+  root.replaceChildren();
+  candidates.forEach((candidate, index) => {
+    const row = el('div', 'approval-row');
+    const label = el(results ? 'div' : 'label');
+    const text = el('span');
+    const identity = `${candidate.repo}#${candidate.number}`;
+    text.append(el('strong', null, identity));
+    if (candidate.url && candidate.url.startsWith('https://github.com/')) {
+      text.append(link(candidate.url, null, candidate.title || identity));
+    } else {
+      text.append(el('span', null, candidate.title || ''));
+    }
+    text.append(el('span', 'approval-meta',
+      [candidate.author, candidate.baseRefName].filter(Boolean).join(' \u2192 ')));
+    const reason = el('span', 'approval-reason',
+      results ? `${candidate.status}${candidate.error ? `: ${candidate.error}` : ''}` : candidate.reason);
+    reason.id = `approval-reason-${index}`;
+    text.append(reason);
+    if (!results) {
+      const checkbox = el('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.index = String(index);
+      checkbox.disabled = !candidate.eligible;
+      checkbox.setAttribute('aria-describedby', reason.id);
+      label.append(checkbox);
+    }
+    label.append(text);
+    row.append(label);
+    root.append(row);
+  });
+}
+
+export function updateApprovalSelection(dialog) {
+  const enabled = [...dialog.querySelectorAll('#approval-list input:not(:disabled)')];
+  const selected = enabled.filter((input) => input.checked);
+  const all = dialog.querySelector('#approval-select-all');
+  all.disabled = enabled.length === 0;
+  all.checked = enabled.length > 0 && enabled.length === selected.length;
+  all.indeterminate = selected.length > 0 && selected.length < enabled.length;
+  dialog.querySelector('#approval-count').textContent = `${selected.length} selected`;
+  dialog.querySelector('#approval-submit').disabled = selected.length === 0;
+}
+
 /** "updated 3m ago" style text for the header. */
 export function lastUpdatedText(state, now = Date.now()) {
   if (state.refreshing) return 'refreshing…';

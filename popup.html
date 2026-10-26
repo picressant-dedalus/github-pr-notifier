@@ -11,10 +11,29 @@
     <span id="logo" class="logo"></span>
     <h1>Pull requests <span id="total" class="count">0</span></h1>
     <span id="last-updated" class="muted"></span>
+    <button id="automerge-all" class="icon-btn" title="Enable auto-merge (rebase) on all listed PRs" aria-label="Enable auto-merge (rebase) on all listed PRs"></button>
+    <button id="approve-prs" class="icon-btn" title="Approve selected PRs" aria-label="Approve selected PRs"></button>
     <button id="refresh" class="icon-btn" title="Refresh now" aria-label="Refresh now"></button>
     <button id="settings" class="icon-btn" title="Settings" aria-label="Settings"></button>
   </header>
+  <div id="status" class="status" hidden></div>
   <main id="content"></main>
+  <dialog id="approval-dialog" aria-labelledby="approval-title" aria-describedby="approval-warning">
+    <div class="approval-layout">
+      <h2 id="approval-title">Approve pull requests</h2>
+      <p id="approval-warning">Approves as your token's user, without a comment. This can allow PRs with auto-merge enabled to merge. Closing this dialog does not cancel a submitted batch.</p>
+      <p id="approval-message" role="status" aria-live="polite"></p>
+      <label id="approval-select-label"><input id="approval-select-all" type="checkbox"> Select all eligible PRs</label>
+      <div id="approval-list"></div>
+      <footer class="approval-actions">
+        <span id="approval-count" aria-live="polite"></span>
+        <button id="approval-close" class="btn" type="button">Cancel</button>
+        <button id="approval-new" class="btn" type="button" hidden>New selection</button>
+        <button id="approval-retry" class="btn" type="button" hidden>Recheck unsuccessful PRs</button>
+        <button id="approval-submit" class="btn btn-primary" type="button" disabled>Approve selected</button>
+      </footer>
+    </div>
+  </dialog>
   <script type="module" src="js/popup.js"></script>
 </body>
 </html>

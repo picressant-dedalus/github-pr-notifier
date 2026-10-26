@@ -27,6 +27,7 @@ const icons = {
   flag: 'flag-16',
   sync: 'sync-16',
   gear: 'gear-16',
+  merge: 'git-merge-16',
   clock: 'clock-16',
   branch: 'git-branch-16',
   pullRequest: 'git-pull-request-16',

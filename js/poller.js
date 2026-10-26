@@ -1,6 +1,6 @@
 // Refresh loop and toolbar badge. Used by the service worker (js/background.js).
 
-import { fetchRepoPullRequests } from './github.js';
+import { enableAutoMergeRebase, fetchRepoPullRequests } from './github.js';
 import { loadSettings, loadState, saveState } from './settings.js';
 
 export const ALARM_NAME = 'refresh-pull-requests';
@@ -71,6 +71,15 @@ export async function updateBadge(settings, state) {
 export async function scheduleRefresh(minutes) {
   await chrome.alarms.clear(ALARM_NAME);
   await chrome.alarms.create(ALARM_NAME, { periodInMinutes: minutes, delayInMinutes: minutes });
+}
+
+/** Enables rebase auto-merge on the given PRs, then refreshes. Returns { done, failed }. */
+export async function enableAutomergeAll(targets) {
+  const settings = await loadSettings();
+  if (!settings.token) throw new Error('No GitHub token configured');
+  const result = await enableAutoMergeRebase(settings.token, targets);
+  await refreshAll();
+  return result;
 }
 
 let inFlight = null;

@@ -28,6 +28,7 @@ query PullRequests($owner: String!, $name: String!, $first: Int!, $after: String
     pullRequests(states: OPEN, first: $first, after: $after, orderBy: { field: CREATED_AT, direction: DESC }) {
       pageInfo { hasNextPage endCursor }
       nodes {
+        id
         number
         title
         url
@@ -195,6 +196,7 @@ export function mapPullRequest(node, { requestedTeams = [], org, teamSlug } = {}
   const rollup = commit && commit.statusCheckRollup ? commit.statusCheckRollup.state : null;
   const files = node.files ? node.files.nodes.map((f) => f.path) : [];
   return {
+    nodeId: node.id,
     number: node.number,
     title: node.title,
     url: node.url,
@@ -230,6 +232,75 @@ export async function fetchRepoPullRequests(token, fullName, teamSlug) {
   return nodes
     .filter((node) => !node.isDraft)
     .map((node) => mapPullRequest(node, { requestedTeams: requested[node.number] || [], org, teamSlug }));
+}
+
+const ENABLE_AUTOMERGE = `mutation($id: ID!) {
+  enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: REBASE }) { clientMutationId }
+}`;
+const DISABLE_AUTOMERGE = `mutation($id: ID!) {
+  disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId }
+}`;
+
+/**
+ * Enables auto-merge with the REBASE method on each target ({ repo, number, nodeId, automerge }).
+ * PRs with auto-merge on another method are switched (disable, then enable); PRs already on
+ * rebase are skipped. Failures are collected per PR, never thrown.
+ * @returns {Promise<{done: number, failed: {repo: string, number: number, error: string}[]}>}
+ */
+export async function enableAutoMergeRebase(token, targets) {
+  let done = 0;
+  const failed = [];
+  for (const t of targets) {
+    if (t.automerge && t.automerge.rebase) continue;
+    try {
+      if (t.automerge && t.automerge.enabled) await graphql(token, DISABLE_AUTOMERGE, { id: t.nodeId }, t.repo);
+      await graphql(token, ENABLE_AUTOMERGE, { id: t.nodeId }, t.repo);
+      done++;
+    } catch (e) {
+      failed.push({ repo: t.repo, number: t.number, error: e.message });
+    }
+  }
+  return { done, failed };
+}
+
+/** Fresh eligibility for the token user; comments do not replace an opinionated review. */
+export async function fetchApprovalCandidate(token, target, login) {
+  const path = `/repos/${target.repo}/pulls/${target.number}`;
+  const pr = await rest(token, path, target.repo);
+  const candidate = {
+    repo: target.repo, number: target.number, title: pr.title,
+    url: pr.html_url, author: pr.user && pr.user.login,
+    baseRefName: pr.base && pr.base.ref, headSha: pr.head && pr.head.sha,
+    eligible: false, reason: ''
+  };
+  if (pr.state !== 'open' || pr.draft) return { ...candidate, reason: 'Not an open, non-draft PR' };
+  if (!candidate.headSha) throw new Error('GitHub did not return the PR head commit');
+  if (String(candidate.author).toLowerCase() === login.toLowerCase()) {
+    return { ...candidate, reason: 'You cannot approve your own PR' };
+  }
+  let latest = null;
+  for (let page = 1; ; page++) {
+    const reviews = await rest(token, `${path}/reviews?per_page=100&page=${page}`, target.repo);
+    for (const review of reviews) {
+      if (review.user && review.user.login.toLowerCase() === login.toLowerCase()
+          && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)) latest = review;
+    }
+    if (reviews.length < 100) break;
+  }
+  if (latest && latest.state === 'APPROVED') return { ...candidate, reason: 'Already approved by you' };
+  return { ...candidate, eligible: true };
+}
+
+/** Submit a normal approval bound to the commit the user selected. Never automatically retry. */
+export async function approvePullRequest(token, target) {
+  const response = await fetch(`${API_URL}/repos/${target.repo}/pulls/${target.number}/reviews`, {
+    method: 'POST',
+    headers: { ...headers(token), 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event: 'APPROVE', commit_id: target.headSha })
+  });
+  if (!response.ok) throw await httpError(response, target.repo);
+  const review = await response.json();
+  if (review.state !== 'APPROVED') throw new Error('GitHub did not confirm the approval; check the PR before retrying');
 }
 
 /** Validates the token; returns the authenticated login and granted scopes. */

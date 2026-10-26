@@ -2,8 +2,9 @@
 // The worker can be stopped at any time by Chrome, so all state lives in chrome.storage and the
 // periodic refresh relies on chrome.alarms (not setInterval).
 
-import { ALARM_NAME, refreshAll, scheduleRefresh, updateBadge } from './poller.js';
+import { ALARM_NAME, enableAutomergeAll, refreshAll, scheduleRefresh, updateBadge } from './poller.js';
 import { SETTINGS_KEY, loadSettings, loadState } from './settings.js';
+import { loadApprovalBatch, prepareApprovals, submitApprovals } from './approvals.js';
 
 async function restart() {
   const settings = await loadSettings();
@@ -34,11 +35,25 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // Manual refresh requested by the popup.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message && ['approval-status', 'prepare-approvals', 'submit-approvals'].includes(message.type)) {
+    const operation = message.type === 'approval-status' ? loadApprovalBatch()
+      : message.type === 'prepare-approvals' ? prepareApprovals(message.targets)
+        : submitApprovals(message.selectionId, message.targets);
+    operation.then((result) => sendResponse({ ok: true, result }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
+  }
   if (message && message.type === 'refresh') {
     refreshAll()
       .then(() => sendResponse({ ok: true }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));
     return true; // async response
+  }
+  if (message && message.type === 'enable-automerge') {
+    enableAutomergeAll(message.targets || [])
+      .then((result) => sendResponse({ ok: true, ...result }))
+      .catch((e) => sendResponse({ ok: false, error: e.message }));
+    return true;
   }
   return false;
 });

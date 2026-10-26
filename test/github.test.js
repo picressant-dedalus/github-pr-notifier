@@ -1,6 +1,6 @@
 import {
   adminsFlagState, automergeState, checkState, fetchRepoPullRequests, formatDuration,
-  mapPullRequest, testToken, checkRepoAccess
+  mapPullRequest, testToken, checkRepoAccess, enableAutoMergeRebase, fetchApprovalCandidate, approvePullRequest
 } from '../js/github.js';
 import { CODEOWNERS, graphqlPage, jsonResponse, mockFetch, prNode } from './helpers.js';
 
@@ -127,4 +127,84 @@ describe('formatDuration', () => {
     ['2024-09-15T12:00:00Z', '2y 1mo'],
     ['2026-10-16T12:00:00Z', '0m']
   ])('%s -> %s', (from, expected) => expect(formatDuration(from, now)).toBe(expected));
+});
+
+describe('enableAutoMergeRebase', () => {
+  it('skips rebase PRs, switches other methods, collects failures', async () => {
+    const queries = [];
+    global.fetch.mockImplementation(async (url, init) => {
+      const { query, variables } = JSON.parse(init.body);
+      queries.push(`${query.match(/(\w+PullRequestAutoMerge)/)[1]}:${variables.id}`);
+      if (variables.id === 'bad') return jsonResponse({ data: null, errors: [{ message: 'Auto merge is not allowed' }] });
+      return jsonResponse({ data: {} });
+    });
+
+    const res = await enableAutoMergeRebase('t', [
+      { repo: 'o/r', number: 1, nodeId: 'a', automerge: { enabled: true, rebase: true } },
+      { repo: 'o/r', number: 2, nodeId: 'b', automerge: { enabled: true, rebase: false } },
+      { repo: 'o/r', number: 3, nodeId: 'c', automerge: { enabled: false, rebase: false } },
+      { repo: 'o/r', number: 4, nodeId: 'bad', automerge: { enabled: false, rebase: false } }
+    ]);
+    expect(queries).toEqual(['disablePullRequestAutoMerge:b', 'enablePullRequestAutoMerge:b', 'enablePullRequestAutoMerge:c', 'enablePullRequestAutoMerge:bad']);
+    expect(res).toEqual({ done: 2, failed: [{ repo: 'o/r', number: 4, error: 'Auto merge is not allowed' }] });
+  });
+});
+
+describe('approval eligibility', () => {
+  const target = { repo: 'o/r', number: 7 };
+  const metadata = {
+    state: 'open', draft: false, title: 'A PR', html_url: 'https://github.com/o/r/pull/7',
+    user: { login: 'author' }, base: { ref: 'main' }, head: { sha: 'abc' }
+  };
+  const review = (state, login = 'me') => ({ state, user: { login } });
+
+  it.each([
+    [[review('APPROVED'), review('COMMENTED'), review('PENDING')], false],
+    [[review('DISMISSED')], true],
+    [[review('APPROVED'), review('CHANGES_REQUESTED')], true],
+    [[review('APPROVED', 'someone-else')], true]
+  ])('uses the latest opinionated review in %j', async (reviews, eligible) => {
+    global.fetch.mockResolvedValueOnce(jsonResponse(metadata)).mockResolvedValueOnce(jsonResponse(reviews));
+    expect(await fetchApprovalCandidate('t', target, 'ME')).toMatchObject({ eligible, headSha: 'abc' });
+  });
+
+  it('reads later review pages before deciding', async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse(metadata))
+      .mockResolvedValueOnce(jsonResponse(Array.from({ length: 100 }, () => review('COMMENTED'))))
+      .mockResolvedValueOnce(jsonResponse([review('APPROVED')]));
+    expect(await fetchApprovalCandidate('t', target, 'me')).toMatchObject({ eligible: false, reason: 'Already approved by you' });
+    expect(global.fetch.mock.calls[2][0]).toContain('page=2');
+  });
+
+  it.each([
+    [{ user: { login: 'Me' } }, 'own PR'],
+    [{ state: 'closed' }, 'Not an open'],
+    [{ draft: true }, 'Not an open']
+  ])('disables ineligible metadata %j without reading reviews', async (overrides, reason) => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ ...metadata, ...overrides }));
+    expect(await fetchApprovalCandidate('t', target, 'me')).toMatchObject({ eligible: false, reason: expect.stringContaining(reason) });
+    expect(global.fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not silently accept missing metadata or review lookup errors', async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ ...metadata, head: null }));
+    await expect(fetchApprovalCandidate('t', target, 'me')).rejects.toThrow('head commit');
+    global.fetch.mockResolvedValueOnce(jsonResponse(metadata))
+      .mockResolvedValueOnce(jsonResponse({ message: 'Forbidden' }, { status: 403 }));
+    await expect(fetchApprovalCandidate('t', target, 'me')).rejects.toThrow('403');
+  });
+
+  it('sends an authenticated, head-bound approval without a comment', async () => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ state: 'APPROVED' }));
+    await approvePullRequest('t', { ...target, headSha: 'abc' });
+    expect(global.fetch).toHaveBeenCalledWith('https://api.github.com/repos/o/r/pulls/7/reviews', expect.objectContaining({
+      method: 'POST', headers: expect.objectContaining({ Authorization: 'bearer t' }),
+      body: JSON.stringify({ event: 'APPROVE', commit_id: 'abc' })
+    }));
+  });
+
+  it.each([401, 403, 422])('surfaces approval HTTP %s errors', async (status) => {
+    global.fetch.mockResolvedValueOnce(jsonResponse({ message: 'Review rejected' }, { status }));
+    await expect(approvePullRequest('t', { ...target, headSha: 'abc' })).rejects.toThrow();
+  });
 });

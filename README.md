@@ -43,6 +43,28 @@ organisation. Inspired by
 
 - Draft PRs are hidden and not counted.
 - Automatic refresh every 5 minutes (configurable), plus a manual refresh button.
+- **Enable auto-merge (rebase) on all listed PRs**: merge-icon button in the popup header. After a
+  confirmation, it targets the PRs currently visible (respecting the old/all filter) that are not
+  already on rebase auto-merge. PRs with auto-merge on another method are switched (disable, then
+  enable) using the GraphQL `enablePullRequestAutoMerge`/`disablePullRequestAutoMerge` mutations
+  (`repo` scope is enough, via the `{type:'enable-automerge'}` worker message). Per-PR failures
+  (e.g. repo without "Allow auto-merge") are listed in the popup, then data is refreshed.
+- **Approve selected PRs**: check-icon button beside auto-merge opens a modal for PRs matching
+  the current All/Older filter. Nothing is selected initially; choose individual PRs or
+  **Select all eligible PRs**, then **Approve selected**. This immediately submits normal
+  approvals as the configured token's user, without a comment or another confirmation.
+  Your own PRs, PRs you already approved, and PRs whose eligibility cannot be checked are
+  disabled with a reason. Closed/draft PRs are also excluded from submission.
+  Approval does not enable auto-merge or bypass GitHub permissions or branch protection, but
+  **can allow PRs with auto-merge already enabled to merge**.
+  Each PR is checked again before submission; changed head commits are skipped rather than
+  silently approving new code. Progress and per-PR results survive popup closure; reopening
+  shows a summary and the approval button opens the saved results. **New selection** starts
+  again with the current filter, while **Recheck unsuccessful PRs** checks only unsuccessful
+  targets and starts with nothing selected. Successful targets are never automatically retried.
+  Closing the modal is not cancellation of a submitted batch. Browser/worker interruption or
+  a lost write response can leave an **uncertain** result: check GitHub before explicitly
+  rechecking/retrying. Uncertain writes are never replayed automatically.
 - If a repository fails to load (wrong name, no access, SSO…) the error is shown in its section,
   and the last known PRs are kept.
 
@@ -80,6 +102,10 @@ GitHub answers 403 and the popup shows an SSO error.
 *Pull requests*, *Contents*, *Commit statuses* and *Checks* (*Metadata* is implied) on the
 repositories.
 
+For **approving PRs**, a fine-grained token additionally needs **Pull requests: write** on the
+target repositories. The token's user must have permission to approve; GitHub does not permit
+self-approval. The classic `repo` scope already covers this.
+
 The token is stored in `chrome.storage.local` (this browser profile only, never synced) and is
 only sent to `https://api.github.com`.
 
@@ -111,6 +137,23 @@ CODEOWNERS matching (`js/codeowners.js`) follows GitHub's rules: gitignore-like 
 last matching line wins. Limitation: only the first 100 changed files are checked for the
 "reviewed" state (the "pending" state is always exact).
 
+### Selective approvals
+
+Approval eligibility is fetched only on demand, leaving the scheduled refresh requests unchanged:
+`GET /user` resolves the token user, then `GET /repos/{owner}/{repo}/pulls/{number}` and paginated
+`GET .../reviews` determine fresh metadata and the user's latest opinionated review.
+Comments/pending reviews do not replace an existing approval; dismissed approvals do not count.
+The worker rechecks eligibility and the selected head before each sequential
+`POST .../reviews` with `{event: "APPROVE", commit_id: "<selected head>"}`.
+Per-PR failures do not stop the remaining targets.
+
+`js/approvals.js` owns the `prepare-approvals`, `submit-approvals`, and `approval-status` workflow.
+Prepared selections (`approvalSelection`) are single-use, and the latest batch (`approvalBatch`)
+stores per-target progress/results separately from refresh state in `chrome.storage.local`.
+No extra token copy is stored. Overlapping submissions are rejected. Interrupted batches are
+reported rather than resumed automatically; rechecking consults GitHub before a manual retry.
+After processing, cached PR data/badges are refreshed; refresh errors do not erase approval results.
+
 ### Badge and refresh
 
 The MV3 service worker (`js/background.js`) schedules a `chrome.alarms` alarm every *N* minutes
@@ -130,6 +173,7 @@ img/                   Toolbar/store icons (generated)
 js/
   background.js        Service worker: events → poller
   poller.js            refreshAll(), computeBadge(), updateBadge(), scheduleRefresh()
+  approvals.js         Worker-owned approval preparation, execution and durable results
   github.js            GitHub API client + pure mapping (checks, automerge, flag, durations)
   codeowners.js        CODEOWNERS parser/matcher
   settings.js          Settings/state persistence, repository list parsing

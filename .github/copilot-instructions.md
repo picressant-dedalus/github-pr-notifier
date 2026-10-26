@@ -40,6 +40,13 @@ functional and technical reference; keep it in sync with any behaviour change.
 - Popup: `js/popup-view.js` is pure DOM rendering (no `chrome.*`), and `js/popup.js` is the glue.
   Options: `js/options.js` exports `initOptions`/`runConnectionTest`. Both auto-init only when
   `document.body.dataset.page` matches (`popup`/`options`), so tests can import them safely.
+- Selective approval: `js/approvals.js` owns `prepare-approvals` / `submit-approvals` /
+  `approval-status` worker messages. On-demand eligibility uses the token user and paginated REST
+  reviews (not aggregate `reviewDecision` or team flags). Native popup dialog respects the active
+  filter; own/already-approved/uncheckable PRs are disabled. Approval writes are bound to the
+  selected head and rechecked before submission. `approvalSelection` is single-use;
+  `approvalBatch` persists progress/results independently of refresh state. Never automatically
+  replay uncertain/interrupted writes. Fine-grained tokens require Pull requests: write.
 - On refresh, a per-repo failure keeps the previous PRs and stores `error`. The badge is neutral
   grey (`#57606a`) with the count, `''` when 0, and red `!` only when no PR at all loaded and there are errors.
 - `settings.badgeMinAgeDays` (default 0 = all) filters the toolbar counter (`isOldEnough` in
