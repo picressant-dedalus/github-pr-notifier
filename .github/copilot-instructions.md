@@ -69,3 +69,4 @@ functional and technical reference; keep it in sync with any behaviour change.
 - UI decisions confirmed with the user: drafts hidden, neutral badge color, no desktop
   notifications, Chrome only, green automerge badge only for the REBASE method.
 - Commits: Conventional Commits (`feat(popup): …`), no `Co-authored-by` trailer.
+  This repository is exempt from mandatory ticket references.

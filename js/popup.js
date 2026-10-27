@@ -7,6 +7,7 @@ import { STATE_KEY, SETTINGS_KEY, loadSettings, loadState } from './settings.js'
 // Last selected popup filter ('all' | 'old'), remembered between popup openings.
 export const FILTER_KEY = 'popupFilter';
 const APPROVAL_BATCH_KEY = 'approvalBatch';
+const APPROVAL_PREPARATION_KEY = 'approvalPreparation';
 
 function initApprovals() {
   const dialog = document.getElementById('approval-dialog');
@@ -16,11 +17,14 @@ function initApprovals() {
   const submit = document.getElementById('approval-submit');
   const retry = document.getElementById('approval-retry');
   const newSelection = document.getElementById('approval-new');
+  const dismiss = document.getElementById('approval-dismiss');
   const all = document.getElementById('approval-select-all');
   let selection = null;
   let batch = null;
   let busy = false;
   let generation = 0;
+  let preparationId = null;
+  let processed = 0;
 
   async function request(type, data = {}) {
     const response = await chrome.runtime.sendMessage({ type, ...data });
@@ -31,6 +35,7 @@ function initApprovals() {
   function showBatch(result) {
     batch = result;
     selection = null;
+    preparationId = null;
     busy = result.status === 'running';
     renderApprovalRows(list, result.targets, { results: true });
     const done = result.targets.filter((target) => target.status === 'succeeded').length;
@@ -45,11 +50,15 @@ function initApprovals() {
     retry.hidden = busy || result.targets.every((target) => target.status === 'succeeded');
     newSelection.hidden = false;
     newSelection.disabled = busy;
+    dismiss.hidden = busy;
+    dismiss.disabled = false;
     document.getElementById('approval-close').textContent = 'Close';
   }
 
   async function prepare(targets) {
     const current = ++generation;
+    preparationId = crypto.randomUUID();
+    processed = 0;
     busy = true;
     selection = null;
     batch = null;
@@ -57,20 +66,25 @@ function initApprovals() {
     submit.disabled = true;
     retry.hidden = true;
     newSelection.hidden = true;
+    dismiss.hidden = true;
     all.checked = false;
     all.indeterminate = false;
     all.disabled = true;
     document.getElementById('approval-select-label').hidden = false;
     document.getElementById('approval-count').textContent = '';
     document.getElementById('approval-close').textContent = 'Cancel';
-    list.replaceChildren();
-    message.textContent = 'Checking your identity and existing approvals...';
+    renderApprovalRows(list, targets.map((target) => ({
+      ...target,
+      author: typeof target.author === 'string' ? target.author : target.author && target.author.login,
+      eligible: false, reason: 'Checking eligibility...'
+    })));
+    message.textContent = `Checking your identity and existing approvals... (0 of ${targets.length} PRs processed)`;
     try {
       if (!targets.length) {
         message.textContent = 'No pull requests match the current filter.';
         return;
       }
-      const result = await request('prepare-approvals', { targets });
+      const result = await request('prepare-approvals', { targets, preparationId });
       if (current !== generation) return;
       selection = result;
       renderApprovalRows(list, selection.candidates);
@@ -79,7 +93,10 @@ function initApprovals() {
     } catch (error) {
       if (current === generation) message.textContent = `Unable to prepare approvals: ${error.message}`;
     } finally {
-      if (current === generation) busy = false;
+      if (current === generation) {
+        busy = false;
+        preparationId = null;
+      }
     }
   }
 
@@ -103,6 +120,7 @@ function initApprovals() {
     submit.disabled = true;
     retry.hidden = true;
     newSelection.hidden = true;
+    dismiss.hidden = true;
     busy = true;
     try {
       const previous = await request('approval-status');
@@ -118,6 +136,30 @@ function initApprovals() {
         busy = false;
       }
     }
+  });
+  async function dismissResults(result, button) {
+    button.disabled = true;
+    try {
+      await request('dismiss-approvals', { batchId: result.id });
+      const status = document.getElementById('status');
+      if (status.dataset.approvalBatchId === result.id) {
+        status.replaceChildren();
+        status.hidden = true;
+        delete status.dataset.approvalBatchId;
+      }
+      if (batch && batch.id === result.id) {
+        batch = null;
+        if (dialog.open) dialog.close();
+      }
+    } catch (error) {
+      if (dialog.open) message.textContent = `Unable to dismiss results: ${error.message}`;
+      else showStatus(document.getElementById('status'), `Unable to dismiss results: ${error.message}`, true);
+    } finally {
+      button.disabled = false;
+    }
+  }
+  dismiss.addEventListener('click', () => {
+    if (!busy && batch) dismissResults(batch, dismiss);
   });
   // A completed result remains visible until explicitly replaced by a fresh selection.
   retry.addEventListener('click', () => {
@@ -138,6 +180,7 @@ function initApprovals() {
   document.getElementById('approval-close').addEventListener('click', () => dialog.close());
   dialog.addEventListener('close', () => {
     generation++;
+    preparationId = null;
     document.body.classList.remove('approvals-open');
     opener.focus();
   });
@@ -167,8 +210,13 @@ function initApprovals() {
     }
   });
   chrome.storage.onChanged.addListener((changes, area) => {
+    const progress = changes[APPROVAL_PREPARATION_KEY] && changes[APPROVAL_PREPARATION_KEY].newValue;
+    if (area === 'local' && dialog.open && preparationId && progress && progress.id === preparationId) {
+      processed = Math.max(processed, progress.processed);
+      message.textContent = `Checking approvals: ${processed} of ${progress.total} PRs processed...`;
+    }
     const result = changes[APPROVAL_BATCH_KEY] && changes[APPROVAL_BATCH_KEY].newValue;
-    if (area === 'local' && result && dialog.open
+    if (area === 'local' && result && !result.dismissed && dialog.open
         && ((selection && result.selectionId === selection.id) || (batch && batch.id === result.id))) showBatch(result);
   });
   return async () => {
@@ -179,6 +227,16 @@ function initApprovals() {
         const done = previous.targets.filter((target) => target.status === 'succeeded').length;
         showStatus(document.getElementById('status'),
           `Approval batch ${previous.status}: ${done}/${previous.targets.length} approved. Open Approve PRs for results.`, previous.status === 'interrupted');
+        const status = document.getElementById('status');
+        status.dataset.approvalBatchId = previous.id;
+        if (previous.status !== 'running') {
+          const button = document.createElement('button');
+          button.type = 'button';
+          button.className = 'btn';
+          button.textContent = 'Dismiss results';
+          button.addEventListener('click', () => dismissResults(previous, button));
+          status.append(document.createTextNode(' '), button);
+        }
       }
     } catch (error) {
       showStatus(document.getElementById('status'), `Unable to load approval results: ${error.message}`, true);
@@ -220,6 +278,7 @@ async function enableAutomerge() {
 }
 
 function showStatus(node, text, isError, details = []) {
+  delete node.dataset.approvalBatchId;
   node.replaceChildren(document.createTextNode(text));
   if (details.length) {
     const list = document.createElement('ul');

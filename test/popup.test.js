@@ -24,6 +24,8 @@ beforeEach(async () => {
   document.documentElement.innerHTML = html.replace(/^<!DOCTYPE html>/i, '');
   document.body.dataset.page = 'test';
   interval = jest.spyOn(global, 'setInterval').mockImplementation(() => 1);
+  let nextId = 0;
+  crypto.randomUUID = jest.fn(() => `preparation-${++nextId}`);
   $('approval-dialog').showModal = function () { this.open = true; $('approval-close').focus(); };
   $('approval-dialog').close = function () { this.open = false; this.dispatchEvent(new Event('close')); };
   savedBatch = null;
@@ -34,6 +36,10 @@ beforeEach(async () => {
   chrome.runtime.sendMessage.mockImplementation(async (message) => {
     if (message.type === 'approval-status') return { ok: true, result: savedBatch };
     if (message.type === 'prepare-approvals') return { ok: true, result: selection };
+    if (message.type === 'dismiss-approvals') {
+      savedBatch = null;
+      return { ok: true };
+    }
     if (message.type === 'submit-approvals') {
       savedBatch = { id: 'batch', selectionId: selection.id, status: 'completed',
         targets: message.targets.map((target) => ({ ...target, status: 'succeeded' })) };
@@ -117,6 +123,62 @@ it('cancels without writing, including during preparation', async () => {
   expect(chrome.runtime.sendMessage).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'submit-approvals' }));
 });
 
+it('shows disabled PR rows while eligibility checks are pending, then enables checked candidates', async () => {
+  const normal = chrome.runtime.sendMessage.getMockImplementation();
+  let release;
+  chrome.runtime.sendMessage.mockImplementation(async (message) => {
+    if (message.type === 'prepare-approvals') return new Promise((resolve) => { release = resolve; });
+    return normal(message);
+  });
+  await open();
+  const pending = [...$('approval-list').querySelectorAll('input')];
+  expect(pending).toHaveLength(3);
+  expect(pending.every((input) => input.disabled && !input.checked)).toBe(true);
+  expect($('approval-list').textContent).toContain('PR 1');
+  expect($('approval-message').textContent).toContain('0 of 3 PRs processed');
+  expect($('approval-submit').disabled).toBe(true);
+  const { preparationId } = chrome.runtime.sendMessage.mock.calls
+    .map(([message]) => message).find((message) => message.type === 'prepare-approvals');
+  await chrome.storage.local.set({ approvalPreparation: { id: preparationId, processed: 1, total: 3 } });
+  expect($('approval-message').textContent).toContain('1 of 3 PRs processed');
+  await chrome.storage.local.set({ approvalPreparation: { id: preparationId, processed: 2, total: 3 } });
+  expect($('approval-message').textContent).toContain('2 of 3 PRs processed');
+  await chrome.storage.local.set({ approvalPreparation: { id: preparationId, processed: 1, total: 3 } });
+  expect($('approval-message').textContent).toContain('2 of 3 PRs processed');
+  release({ ok: true, result: selection });
+  await tick();
+  expect($('approval-list').querySelector('input').disabled).toBe(false);
+  expect($('approval-list').querySelector('input').checked).toBe(false);
+  await chrome.storage.local.set({ approvalPreparation: { id: preparationId, processed: 3, total: 3 } });
+  expect($('approval-message').textContent).toContain('Select the PRs to approve');
+});
+
+it('ignores preparation progress from a previously closed dialog', async () => {
+  const normal = chrome.runtime.sendMessage.getMockImplementation();
+  const requests = [];
+  chrome.runtime.sendMessage.mockImplementation(async (message) => {
+    if (message.type === 'prepare-approvals') return new Promise((resolve) => {
+      requests.push({ id: message.preparationId, resolve });
+    });
+    return normal(message);
+  });
+  await open();
+  $('approval-close').click();
+  $('approve-prs').click();
+  await tick();
+  expect(requests[0].id).not.toBe(requests[1].id);
+  await chrome.storage.local.set({ approvalPreparation: { id: requests[0].id, processed: 2, total: 3 } });
+  expect($('approval-message').textContent).toContain('0 of 3 PRs processed');
+  requests[0].resolve({ ok: true, result: selection });
+  await tick();
+  expect($('approval-message').textContent).toContain('0 of 3 PRs processed');
+  await chrome.storage.local.set({ approvalPreparation: { id: requests[1].id, processed: 1, total: 3 } });
+  expect($('approval-message').textContent).toContain('1 of 3 PRs processed');
+  requests[1].resolve({ ok: true, result: selection });
+  await tick();
+  expect($('approval-message').textContent).toContain('Select the PRs to approve');
+});
+
 it('restores stored progress and results, excluding successes on explicit recheck', async () => {
   savedBatch = { id: 'saved', status: 'completed', targets: [
     { repo: 'o/r', number: 1, status: 'succeeded' },
@@ -128,7 +190,7 @@ it('restores stored progress and results, excluding successes on explicit rechec
   $('approval-retry').click();
   await tick();
   expect(chrome.runtime.sendMessage).toHaveBeenLastCalledWith({
-    type: 'prepare-approvals', targets: [savedBatch.targets[1]]
+    type: 'prepare-approvals', targets: [savedBatch.targets[1]], preparationId: expect.any(String)
   });
   expect($('approval-list').querySelector('input').checked).toBe(false);
 });
@@ -143,8 +205,50 @@ it('shows running progress from storage without allowing another submission', as
   expect($('approval-message').textContent).toContain('Approving');
   expect($('approval-new').disabled).toBe(true);
   expect($('approval-submit').hidden).toBe(true);
+  expect($('approval-dismiss').hidden).toBe(true);
   $('approval-close').click();
   expect(chrome._store().approvalBatch.status).toBe('running');
+});
+
+it.each(['dialog', 'summary'])('dismisses saved results from the %s and opens a fresh selection next time', async (source) => {
+  savedBatch = { id: 'saved', status: 'completed', targets: [
+    { repo: 'o/r', number: 1, status: 'succeeded' }
+  ] };
+  await initPopup();
+  expect($('status').hidden).toBe(false);
+  if (source === 'dialog') {
+    $('approve-prs').click();
+    await tick();
+    expect($('approval-dismiss').hidden).toBe(false);
+    $('approval-dismiss').click();
+  } else {
+    $('status').querySelector('button').click();
+  }
+  await tick();
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({ type: 'dismiss-approvals', batchId: 'saved' });
+  expect($('status').hidden).toBe(true);
+  expect($('approval-dialog').open).toBe(false);
+  $('approve-prs').click();
+  await tick();
+  expect($('approval-message').textContent).toContain('Select the PRs to approve');
+  expect($('approval-dismiss').hidden).toBe(true);
+});
+
+it('keeps saved results and reports dismissal failures', async () => {
+  savedBatch = { id: 'saved', status: 'completed', targets: [
+    { repo: 'o/r', number: 1, status: 'succeeded' }
+  ] };
+  const normal = chrome.runtime.sendMessage.getMockImplementation();
+  chrome.runtime.sendMessage.mockImplementation((message) => message.type === 'dismiss-approvals'
+    ? Promise.resolve({ ok: false, error: 'Storage unavailable' }) : normal(message));
+  await open();
+  $('approval-dismiss').click();
+  await tick();
+  expect($('approval-dialog').open).toBe(true);
+  expect($('approval-message').textContent).toContain('Unable to dismiss results: Storage unavailable');
+  expect($('approval-dismiss').disabled).toBe(false);
+  expect($('status').hidden).toBe(false);
+  expect(savedBatch.id).toBe('saved');
 });
 
 it.each(['prepare-approvals', 'submit-approvals', 'approval-status'])('exposes %s messaging errors', async (type) => {

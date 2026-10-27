@@ -104,8 +104,8 @@ async function graphql(token, query, variables, fullName) {
   return body.data;
 }
 
-async function rest(token, path, fullName) {
-  const response = await fetch(`${API_URL}${path}`, { headers: headers(token) });
+async function rest(token, path, fullName, signal) {
+  const response = await fetch(`${API_URL}${path}`, { headers: headers(token), signal });
   if (!response.ok) throw await httpError(response, fullName);
   return response.json();
 }
@@ -264,9 +264,9 @@ export async function enableAutoMergeRebase(token, targets) {
 }
 
 /** Fresh eligibility for the token user; comments do not replace an opinionated review. */
-export async function fetchApprovalCandidate(token, target, login) {
+export async function fetchApprovalCandidate(token, target, login, signal) {
   const path = `/repos/${target.repo}/pulls/${target.number}`;
-  const pr = await rest(token, path, target.repo);
+  const pr = await rest(token, path, target.repo, signal);
   const candidate = {
     repo: target.repo, number: target.number, title: pr.title,
     url: pr.html_url, author: pr.user && pr.user.login,
@@ -280,7 +280,7 @@ export async function fetchApprovalCandidate(token, target, login) {
   }
   let latest = null;
   for (let page = 1; ; page++) {
-    const reviews = await rest(token, `${path}/reviews?per_page=100&page=${page}`, target.repo);
+    const reviews = await rest(token, `${path}/reviews?per_page=100&page=${page}`, target.repo, signal);
     for (const review of reviews) {
       if (review.user && review.user.login.toLowerCase() === login.toLowerCase()
           && ['APPROVED', 'CHANGES_REQUESTED', 'DISMISSED'].includes(review.state)) latest = review;
@@ -304,8 +304,8 @@ export async function approvePullRequest(token, target) {
 }
 
 /** Validates the token; returns the authenticated login and granted scopes. */
-export async function testToken(token) {
-  const response = await fetch(`${API_URL}/user`, { headers: headers(token) });
+export async function testToken(token, signal) {
+  const response = await fetch(`${API_URL}/user`, { headers: headers(token), signal });
   if (!response.ok) throw await httpError(response);
   const user = await response.json();
   const scopes = (response.headers.get('x-oauth-scopes') || '').split(',').map((s) => s.trim()).filter(Boolean);

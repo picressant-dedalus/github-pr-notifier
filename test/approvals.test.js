@@ -1,4 +1,4 @@
-import { APPROVAL_BATCH_KEY, APPROVAL_SELECTION_KEY, loadApprovalBatch, prepareApprovals, submitApprovals } from '../js/approvals.js';
+import { APPROVAL_BATCH_KEY, APPROVAL_SELECTION_KEY, dismissApprovalBatch, loadApprovalBatch, prepareApprovals, submitApprovals } from '../js/approvals.js';
 import { approvePullRequest, fetchApprovalCandidate, GitHubError, testToken } from '../js/github.js';
 import { refreshAll } from '../js/poller.js';
 import { saveSettings } from '../js/settings.js';
@@ -32,6 +32,58 @@ it('deduplicates configured targets and records per-PR lookup failures', async (
   expect(testToken).toHaveBeenCalledTimes(1);
 });
 
+it('reports preparation progress for successful and failed checks', async () => {
+  const progress = jest.fn(async () => {});
+  fetchApprovalCandidate.mockRejectedValueOnce(new Error('No access'));
+  await prepareApprovals([target(), target(2)], progress);
+  expect(progress.mock.calls.map(([value]) => value)).toEqual([
+    { processed: 0, total: 2 },
+    { processed: 1, total: 2 },
+    { processed: 2, total: 2 }
+  ]);
+});
+
+it('checks multiple PRs concurrently with a bounded pool and preserves their order', async () => {
+  const releases = [];
+  fetchApprovalCandidate.mockImplementation((_token, value) => new Promise((resolve) => {
+    releases.push(() => resolve(candidate(value.number)));
+  }));
+  const pending = prepareApprovals(Array.from({ length: 6 }, (_, index) => target(index + 1)));
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fetchApprovalCandidate).toHaveBeenCalledTimes(4);
+  releases.splice(0).reverse().forEach((release) => release());
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(fetchApprovalCandidate).toHaveBeenCalledTimes(6);
+  releases.forEach((release) => release());
+  const selection = await pending;
+  expect(selection.candidates.map((value) => value.number)).toEqual([1, 2, 3, 4, 5, 6]);
+});
+
+it.each(['identity', 'candidate'])('times out a stalled %s check and aborts its requests', async (stage) => {
+  jest.useFakeTimers();
+  let signal;
+  const stalled = (...args) => {
+    signal = args[args.length - 1];
+    return new Promise(() => {});
+  };
+  if (stage === 'identity') testToken.mockImplementation(stalled);
+  else fetchApprovalCandidate.mockImplementation(stalled);
+  try {
+    const pending = prepareApprovals([target()]);
+    const outcome = stage === 'identity'
+      ? expect(pending).rejects.toThrow('timed out')
+      : expect(pending).resolves.toMatchObject({
+        candidates: [{ eligible: false, reason: expect.stringContaining('timed out') }]
+      });
+    await jest.advanceTimersByTimeAsync(20000);
+    await outcome;
+    expect(signal.aborted).toBe(true);
+    expect(approvePullRequest).not.toHaveBeenCalled();
+  } finally {
+    jest.useRealTimers();
+  }
+});
+
 it('rejects missing tokens, invalid targets and unconfigured repositories', async () => {
   await expect(prepareApprovals([{ repo: 'other/repo', number: 1 }])).rejects.toThrow('not configured');
   await expect(prepareApprovals([target(-1)])).rejects.toThrow('Invalid');
@@ -53,6 +105,20 @@ it('persists outcomes across a mixed batch and never replays the same selection'
   expect(approvePullRequest).toHaveBeenCalledTimes(3);
 });
 
+it('persistently dismisses only the requested batch without allowing its selection to replay', async () => {
+  const selection = await prepareApprovals([target()]);
+  const batch = await submitApprovals(selection.id, [target()]);
+  await expect(dismissApprovalBatch('other')).rejects.toThrow('results changed');
+  expect(await loadApprovalBatch()).toEqual(batch);
+  await dismissApprovalBatch(batch.id);
+  expect(await loadApprovalBatch()).toBeNull();
+  expect(chrome._store()[APPROVAL_BATCH_KEY].dismissed).toBe(true);
+  await expect(submitApprovals(selection.id, [target()])).rejects.toThrow('already submitted');
+  const next = await prepareApprovals([target(2)]);
+  const nextBatch = await submitApprovals(next.id, [target(2)]);
+  expect(await loadApprovalBatch()).toEqual(nextBatch);
+});
+
 it('persists running before each write and rejects overlap', async () => {
   const selection = await prepareApprovals([target()]);
   let release;
@@ -64,6 +130,7 @@ it('persists running before each write and rejects overlap', async () => {
   const first = submitApprovals(selection.id, [target()]);
   await expect(submitApprovals(selection.id, [target()])).rejects.toThrow('already running');
   await expect(prepareApprovals([target()])).rejects.toThrow('already running');
+  await expect(dismissApprovalBatch('anything')).rejects.toThrow('still running');
   release();
   await first;
 });

@@ -53,6 +53,10 @@ organisation. Inspired by
   the current All/Older filter. Nothing is selected initially; choose individual PRs or
   **Select all eligible PRs**, then **Approve selected**. This immediately submits normal
   approvals as the configured token's user, without a comment or another confirmation.
+  PRs appear immediately but remain disabled while eligibility is checked. A live counter
+  shows how many PRs have been processed out of the total (including failed checks). Checks run up to
+  four PRs at a time; identity and individual PR checks time out after 20 seconds and display
+  an error instead of waiting indefinitely.
   Your own PRs, PRs you already approved, and PRs whose eligibility cannot be checked are
   disabled with a reason. Closed/draft PRs are also excluded from submission.
   Approval does not enable auto-merge or bypass GitHub permissions or branch protection, but
@@ -62,6 +66,8 @@ organisation. Inspired by
   shows a summary and the approval button opens the saved results. **New selection** starts
   again with the current filter, while **Recheck unsuccessful PRs** checks only unsuccessful
   targets and starts with nothing selected. Successful targets are never automatically retried.
+  **Dismiss results** in the dialog or top summary permanently hides that batch from both
+  places. It is unavailable while a batch is running; future batches still show their results.
   Closing the modal is not cancellation of a submitted batch. Browser/worker interruption or
   a lost write response can leave an **uncertain** result: check GitHub before explicitly
   rechecking/retrying. Uncertain writes are never replayed automatically.

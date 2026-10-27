@@ -4,7 +4,7 @@
 
 import { ALARM_NAME, enableAutomergeAll, refreshAll, scheduleRefresh, updateBadge } from './poller.js';
 import { SETTINGS_KEY, loadSettings, loadState } from './settings.js';
-import { loadApprovalBatch, prepareApprovals, submitApprovals } from './approvals.js';
+import { dismissApprovalBatch, loadApprovalBatch, prepareApprovals, submitApprovals } from './approvals.js';
 
 async function restart() {
   const settings = await loadSettings();
@@ -35,9 +35,11 @@ chrome.storage.onChanged.addListener((changes, area) => {
 
 // Manual refresh requested by the popup.
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message && ['approval-status', 'prepare-approvals', 'submit-approvals'].includes(message.type)) {
+  if (message && ['approval-status', 'prepare-approvals', 'submit-approvals', 'dismiss-approvals'].includes(message.type)) {
     const operation = message.type === 'approval-status' ? loadApprovalBatch()
-      : message.type === 'prepare-approvals' ? prepareApprovals(message.targets)
+      : message.type === 'dismiss-approvals' ? dismissApprovalBatch(message.batchId)
+      : message.type === 'prepare-approvals' ? prepareApprovals(message.targets, (progress) =>
+        chrome.storage.local.set({ approvalPreparation: { ...progress, id: message.preparationId } }))
         : submitApprovals(message.selectionId, message.targets);
     operation.then((result) => sendResponse({ ok: true, result }))
       .catch((e) => sendResponse({ ok: false, error: e.message }));

@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "GitHub PR Notifier",
   "description": "Lists the open pull requests of your GitHub repositories and shows how many are waiting on the toolbar.",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "minimum_chrome_version": "102",
   "action": {
     "default_icon": {

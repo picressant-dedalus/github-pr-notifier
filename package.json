@@ -1,6 +1,6 @@
 {
   "name": "github-pr-notifier",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "description": "Chrome extension (Manifest V3) listing open pull requests of a set of GitHub repositories, with a toolbar badge counting waiting PRs",
   "scripts": {
