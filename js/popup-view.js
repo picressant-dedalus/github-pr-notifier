@@ -218,7 +218,7 @@ export function visiblePullRequests({ settings, state, now = Date.now(), filter 
 }
 
 /** Pure selection/result rows. Candidate indexes are only local DOM keys, never PR identities. */
-export function renderApprovalRows(root, candidates, { results = false } = {}) {
+export function renderApprovalRows(root, candidates, { results = false, prefix = 'approval' } = {}) {
   root.replaceChildren();
   candidates.forEach((candidate, index) => {
     const row = el('div', 'approval-row');
@@ -235,7 +235,7 @@ export function renderApprovalRows(root, candidates, { results = false } = {}) {
       [candidate.author, candidate.baseRefName].filter(Boolean).join(' \u2192 ')));
     const reason = el('span', 'approval-reason',
       results ? `${candidate.status}${candidate.error ? `: ${candidate.error}` : ''}` : candidate.reason);
-    reason.id = `approval-reason-${index}`;
+    reason.id = `${prefix}-reason-${index}`;
     text.append(reason);
     if (!results) {
       const checkbox = el('input');
@@ -251,15 +251,15 @@ export function renderApprovalRows(root, candidates, { results = false } = {}) {
   });
 }
 
-export function updateApprovalSelection(dialog) {
-  const enabled = [...dialog.querySelectorAll('#approval-list input:not(:disabled)')];
+export function updateApprovalSelection(dialog, prefix = 'approval') {
+  const enabled = [...dialog.querySelectorAll(`#${prefix}-list input:not(:disabled)`)];
   const selected = enabled.filter((input) => input.checked);
-  const all = dialog.querySelector('#approval-select-all');
+  const all = dialog.querySelector(`#${prefix}-select-all`);
   all.disabled = enabled.length === 0;
   all.checked = enabled.length > 0 && enabled.length === selected.length;
   all.indeterminate = selected.length > 0 && selected.length < enabled.length;
-  dialog.querySelector('#approval-count').textContent = `${selected.length} selected`;
-  dialog.querySelector('#approval-submit').disabled = selected.length === 0;
+  dialog.querySelector(`#${prefix}-count`).textContent = `${selected.length} selected`;
+  dialog.querySelector(`#${prefix}-submit`).disabled = selected.length === 0;
 }
 
 /** "updated 3m ago" style text for the header. */

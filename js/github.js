@@ -11,10 +11,11 @@ const PAGE_SIZE = 50;
 const MAX_PAGES = 4;
 
 export class GitHubError extends Error {
-  constructor(message, status) {
+  constructor(message, status, rejected = false) {
     super(message);
     this.name = 'GitHubError';
     this.status = status;
+    this.rejected = rejected;
   }
 }
 
@@ -83,11 +84,12 @@ async function httpError(response, fullName) {
   return new GitHubError(`GitHub API error ${response.status}${detail ? `: ${detail}` : ''}`, response.status);
 }
 
-async function graphql(token, query, variables, fullName) {
+async function graphql(token, query, variables, fullName, signal) {
   const response = await fetch(`${API_URL}/graphql`, {
     method: 'POST',
     headers: { ...headers(token), 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, variables })
+    body: JSON.stringify({ query, variables }),
+    signal
   });
   if (!response.ok) throw await httpError(response, fullName);
   const body = await response.json();
@@ -99,7 +101,8 @@ async function graphql(token, query, variables, fullName) {
     if (first.type === 'NOT_FOUND') {
       throw new GitHubError(`Repository ${fullName} not found or not accessible with this token`, 404);
     }
-    throw new GitHubError(first.message || 'GitHub GraphQL error');
+    const rejected = ['FORBIDDEN', 'UNAUTHORIZED', 'UNPROCESSABLE', 'GRAPHQL_VALIDATION_FAILED'].includes(first.type);
+    throw new GitHubError(first.message || 'GitHub GraphQL error', undefined, rejected);
   }
   return body.data;
 }
@@ -241,26 +244,38 @@ const DISABLE_AUTOMERGE = `mutation($id: ID!) {
   disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId }
 }`;
 
-/**
- * Enables auto-merge with the REBASE method on each target ({ repo, number, nodeId, automerge }).
- * PRs with auto-merge on another method are switched (disable, then enable); PRs already on
- * rebase are skipped. Failures are collected per PR, never thrown.
- * @returns {Promise<{done: number, failed: {repo: string, number: number, error: string}[]}>}
- */
-export async function enableAutoMergeRebase(token, targets) {
-  let done = 0;
-  const failed = [];
-  for (const t of targets) {
-    if (t.automerge && t.automerge.rebase) continue;
-    try {
-      if (t.automerge && t.automerge.enabled) await graphql(token, DISABLE_AUTOMERGE, { id: t.nodeId }, t.repo);
-      await graphql(token, ENABLE_AUTOMERGE, { id: t.nodeId }, t.repo);
-      done++;
-    } catch (e) {
-      failed.push({ repo: t.repo, number: t.number, error: e.message });
+export async function fetchAutomergeCandidate(token, target, signal) {
+  const [owner, name] = target.repo.split('/');
+  const data = await graphql(token, `query($owner: String!, $name: String!, $number: Int!) {
+    repository(owner: $owner, name: $name) {
+      pullRequest(number: $number) {
+        id title url state isDraft baseRefName author { login }
+        autoMergeRequest { mergeMethod }
+      }
     }
+  }`, { owner, name, number: target.number }, target.repo, signal);
+  const pr = data.repository && data.repository.pullRequest;
+  if (!pr) throw new Error('GitHub did not return the pull request');
+  const automerge = automergeState(pr.autoMergeRequest);
+  const reason = pr.state !== 'OPEN' || pr.isDraft ? 'Not an open, non-draft PR'
+    : !pr.id ? 'Missing pull request ID'
+      : automerge.rebase ? 'Auto-merge (rebase) is already enabled' : '';
+  return {
+    repo: target.repo, number: target.number, nodeId: pr.id,
+    title: pr.title, url: pr.url, author: pr.author ? pr.author.login : 'ghost',
+    baseRefName: pr.baseRefName, automerge, eligible: !reason, reason
+  };
+}
+
+/** Stage is persisted before each write; an interrupted method switch must not be replayed. */
+export async function enableAutoMergeRebase(token, target, onStage = async () => {}) {
+  if (target.automerge.rebase) return;
+  if (target.automerge.enabled) {
+    await onStage('disabling');
+    await graphql(token, DISABLE_AUTOMERGE, { id: target.nodeId }, target.repo);
   }
-  return { done, failed };
+  await onStage(target.automerge.enabled ? 'enabling-after-disable' : 'enabling');
+  await graphql(token, ENABLE_AUTOMERGE, { id: target.nodeId }, target.repo);
 }
 
 /** Fresh eligibility for the token user; comments do not replace an opinionated review. */

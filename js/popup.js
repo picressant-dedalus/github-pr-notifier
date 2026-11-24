@@ -3,6 +3,7 @@
 import { ICONS } from './icons.js';
 import { FILTER_ALL, lastUpdatedText, renderApprovalRows, renderPopup, updateApprovalSelection, visiblePullRequests } from './popup-view.js';
 import { STATE_KEY, SETTINGS_KEY, loadSettings, loadState } from './settings.js';
+import { initAutomerge } from './automerge-popup.js';
 
 // Last selected popup filter ('all' | 'old'), remembered between popup openings.
 export const FILTER_KEY = 'popupFilter';
@@ -253,30 +254,6 @@ async function render() {
   document.getElementById('refresh').classList.toggle('spinning', Boolean(state.refreshing));
 }
 
-async function enableAutomerge() {
-  const [settings, state, stored] = await Promise.all([loadSettings(), loadState(), chrome.storage.local.get(FILTER_KEY)]);
-  const targets = visiblePullRequests({ settings, state, filter: stored[FILTER_KEY] || FILTER_ALL })
-    .filter((pr) => pr.nodeId && !pr.automerge.rebase)
-    .map((pr) => ({ repo: pr.repo, number: pr.number, nodeId: pr.nodeId, automerge: pr.automerge }));
-  const status = document.getElementById('status');
-  if (targets.length === 0) {
-    showStatus(status, 'Every listed PR already has auto-merge (rebase) enabled.', false);
-    return;
-  }
-  if (!window.confirm(`Enable auto-merge (rebase) on ${targets.length} pull request${targets.length === 1 ? '' : 's'}?`)) return;
-  const button = document.getElementById('automerge-all');
-  button.disabled = true;
-  try {
-    const res = await chrome.runtime.sendMessage({ type: 'enable-automerge', targets });
-    if (!res || !res.ok) showStatus(status, `Failed: ${(res && res.error) || 'no response'}`, true);
-    else showStatus(status, `Auto-merge (rebase) enabled on ${res.done} PR${res.done === 1 ? '' : 's'}.`, res.failed.length > 0,
-      res.failed.map((f) => `${f.repo.split('/')[1]}#${f.number}: ${f.error}`));
-  } finally {
-    button.disabled = false;
-    await render();
-  }
-}
-
 function showStatus(node, text, isError, details = []) {
   delete node.dataset.approvalBatchId;
   node.replaceChildren(document.createTextNode(text));
@@ -304,13 +281,12 @@ async function refresh() {
 
 export function initPopup() {
   const restoreApprovals = initApprovals();
+  const restoreAutomerge = initAutomerge();
   document.getElementById('logo').innerHTML = ICONS.github;
   document.getElementById('refresh').innerHTML = ICONS.sync;
-  document.getElementById('automerge-all').innerHTML = ICONS.merge;
   document.getElementById('settings').innerHTML = ICONS.gear;
 
   document.getElementById('refresh').addEventListener('click', () => refresh());
-  document.getElementById('automerge-all').addEventListener('click', () => enableAutomerge());
   document.getElementById('settings').addEventListener('click', () => chrome.runtime.openOptionsPage());
   document.getElementById('content').addEventListener('click', (event) => {
     if (event.target.closest('.open-options')) chrome.runtime.openOptionsPage();
@@ -324,7 +300,7 @@ export function initPopup() {
   // Keep the "age" of PRs and the last-updated text current while the popup stays open.
   setInterval(render, 60 * 1000);
 
-  return Promise.all([render(), restoreApprovals()]);
+  return Promise.all([render(), restoreApprovals(), restoreAutomerge()]);
 }
 
 if (typeof document !== 'undefined' && document.getElementById('content') && document.body.dataset.page === 'popup') {

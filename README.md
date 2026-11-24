@@ -43,12 +43,24 @@ organisation. Inspired by
 
 - Draft PRs are hidden and not counted.
 - Automatic refresh every 5 minutes (configurable), plus a manual refresh button.
-- **Enable auto-merge (rebase) on all listed PRs**: merge-icon button in the popup header. After a
-  confirmation, it targets the PRs currently visible (respecting the old/all filter) that are not
-  already on rebase auto-merge. PRs with auto-merge on another method are switched (disable, then
-  enable) using the GraphQL `enablePullRequestAutoMerge`/`disablePullRequestAutoMerge` mutations
-  (`repo` scope is enough, via the `{type:'enable-automerge'}` worker message). Per-PR failures
-  (e.g. repo without "Allow auto-merge") are listed in the popup, then data is refreshed.
+- **Enable auto-merge (rebase) on selected PRs**: merge-icon button in the popup header opens
+  a modal for PRs matching the current All/Older filter. Nothing is selected initially; choose
+  individual PRs or **Select all eligible PRs**, then **Enable selected** with no extra confirmation.
+  PRs are disabled while fresh eligibility checks run, with a live processed counter. Already-rebase,
+  closed/draft, missing-ID and uncheckable PRs remain disabled with a reason. Checks run up to
+  four PRs at a time and time out after 20 seconds. Your own and already-approved PRs may be selected.
+  Only checked PRs are submitted, and each is checked again before writing. PRs with another
+  auto-merge method are switched by disabling it, then enabling REBASE; this **can allow PRs to
+  merge immediately**, subject to GitHub permissions and branch protection.
+  Progress and per-PR results survive popup closure; closing the dialog does not cancel a batch.
+  Reopening shows the latest saved results. **New selection** uses the current filter;
+  **Recheck unsuccessful PRs** checks only unsuccessful targets and starts unchecked.
+  **Dismiss results** hides the completed batch from the dialog and its independent top summary.
+  Dismissal and new selections are unavailable while running. Interrupted batches are not resumed:
+  writes with lost responses are **uncertain**, never automatically retried. Check GitHub before
+  manually rechecking/retrying, especially when a method switch may have disabled the prior
+  method without enabling rebase. Per-PR errors do not stop the remaining PRs; refresh errors
+  do not erase saved results. The classic `repo` token scope remains sufficient.
 - **Approve selected PRs**: check-icon button beside auto-merge opens a modal for PRs matching
   the current All/Older filter. Nothing is selected initially; choose individual PRs or
   **Select all eligible PRs**, then **Approve selected**. This immediately submits normal
@@ -160,6 +172,22 @@ No extra token copy is stored. Overlapping submissions are rejected. Interrupted
 reported rather than resumed automatically; rechecking consults GitHub before a manual retry.
 After processing, cached PR data/badges are refreshed; refresh errors do not erase approval results.
 
+### Selective auto-merge
+
+`js/automerge.js` owns `prepare-automerge`, `submit-automerge`, `automerge-status` and
+`dismiss-automerge`. On-demand GraphQL metadata checks use the repository/PR identity and
+`autoMergeRequest.mergeMethod`, without team fields or additional scopes. The worker stores a
+single-use `automergeSelection` and the latest `automergeBatch` independently of approval and
+refresh state. The popup submits only checked repository/number pairs plus the selection ID;
+the worker resolves and rechecks the PR node ID and current method itself.
+
+Mutations are sequential `enablePullRequestAutoMerge` with REBASE, preceded by
+`disablePullRequestAutoMerge` when switching methods. Each write stage is saved before the
+request, so interrupted switches can be reported conservatively instead of replayed.
+Definite permission/validation rejections are failed; ambiguous network/server outcomes are
+uncertain. Remaining pending PRs are skipped if the worker is interrupted. There is no automatic
+retry or rollback of a partially completed switch. No token copy is stored in selections or batches.
+
 ### Badge and refresh
 
 The MV3 service worker (`js/background.js`) schedules a `chrome.alarms` alarm every *N* minutes
@@ -180,6 +208,8 @@ js/
   background.js        Service worker: events → poller
   poller.js            refreshAll(), computeBadge(), updateBadge(), scheduleRefresh()
   approvals.js         Worker-owned approval preparation, execution and durable results
+  automerge.js         Worker-owned auto-merge preparation, execution and durable results
+  automerge-popup.js   Auto-merge selection dialog, progress and saved-results UI
   github.js            GitHub API client + pure mapping (checks, automerge, flag, durations)
   codeowners.js        CODEOWNERS parser/matcher
   settings.js          Settings/state persistence, repository list parsing

@@ -1,6 +1,6 @@
 import {
   adminsFlagState, automergeState, checkState, fetchRepoPullRequests, formatDuration,
-  mapPullRequest, testToken, checkRepoAccess, enableAutoMergeRebase, fetchApprovalCandidate, approvePullRequest
+  mapPullRequest, testToken, checkRepoAccess, enableAutoMergeRebase, fetchAutomergeCandidate, fetchApprovalCandidate, approvePullRequest
 } from '../js/github.js';
 import { CODEOWNERS, graphqlPage, jsonResponse, mockFetch, prNode } from './helpers.js';
 
@@ -130,23 +130,60 @@ describe('formatDuration', () => {
 });
 
 describe('enableAutoMergeRebase', () => {
-  it('skips rebase PRs, switches other methods, collects failures', async () => {
+  it('skips rebase PRs and reports switch stages before each mutation', async () => {
     const queries = [];
+    const stages = [];
     global.fetch.mockImplementation(async (url, init) => {
       const { query, variables } = JSON.parse(init.body);
+      expect(stages[stages.length - 1]).toBe(queries.length === 0 ? 'disabling' : queries.length === 1 ? 'enabling-after-disable' : 'enabling');
       queries.push(`${query.match(/(\w+PullRequestAutoMerge)/)[1]}:${variables.id}`);
-      if (variables.id === 'bad') return jsonResponse({ data: null, errors: [{ message: 'Auto merge is not allowed' }] });
       return jsonResponse({ data: {} });
     });
+    const onStage = async (stage) => { stages.push(stage); };
+    await enableAutoMergeRebase('t', { repo: 'o/r', nodeId: 'a', automerge: { enabled: true, rebase: true } }, onStage);
+    await enableAutoMergeRebase('t', { repo: 'o/r', nodeId: 'b', automerge: { enabled: true, rebase: false } }, onStage);
+    await enableAutoMergeRebase('t', { repo: 'o/r', nodeId: 'c', automerge: { enabled: false, rebase: false } }, onStage);
+    expect(queries).toEqual(['disablePullRequestAutoMerge:b', 'enablePullRequestAutoMerge:b', 'enablePullRequestAutoMerge:c']);
+  });
 
-    const res = await enableAutoMergeRebase('t', [
-      { repo: 'o/r', number: 1, nodeId: 'a', automerge: { enabled: true, rebase: true } },
-      { repo: 'o/r', number: 2, nodeId: 'b', automerge: { enabled: true, rebase: false } },
-      { repo: 'o/r', number: 3, nodeId: 'c', automerge: { enabled: false, rebase: false } },
-      { repo: 'o/r', number: 4, nodeId: 'bad', automerge: { enabled: false, rebase: false } }
-    ]);
-    expect(queries).toEqual(['disablePullRequestAutoMerge:b', 'enablePullRequestAutoMerge:b', 'enablePullRequestAutoMerge:c', 'enablePullRequestAutoMerge:bad']);
-    expect(res).toEqual({ done: 2, failed: [{ repo: 'o/r', number: 4, error: 'Auto merge is not allowed' }] });
+  it('propagates failure after disabling and never enables after a failed stage save', async () => {
+    const target = { repo: 'o/r', nodeId: 'b', automerge: { enabled: true, rebase: false } };
+    global.fetch.mockResolvedValueOnce(jsonResponse({ data: {} }))
+      .mockResolvedValueOnce(jsonResponse({ data: null, errors: [{ message: 'Not allowed' }] }));
+    const stage = jest.fn(async () => {});
+    await expect(enableAutoMergeRebase('t', target, stage)).rejects.toThrow('Not allowed');
+    expect(stage.mock.calls).toEqual([['disabling'], ['enabling-after-disable']]);
+    global.fetch.mockClear();
+    await expect(enableAutoMergeRebase('t', target, async () => { throw new Error('Storage failed'); })).rejects.toThrow('Storage failed');
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
+
+  it('distinguishes explicit GraphQL rejection from ambiguous server errors', async () => {
+    const target = { repo: 'o/r', nodeId: 'b', automerge: { enabled: false, rebase: false } };
+    global.fetch.mockResolvedValueOnce(jsonResponse({ data: null, errors: [{ type: 'UNPROCESSABLE', message: 'Not allowed' }] }))
+      .mockResolvedValueOnce(jsonResponse({ data: null, errors: [{ type: 'INTERNAL', message: 'Server error' }] }));
+    await expect(enableAutoMergeRebase('t', target)).rejects.toMatchObject({ rejected: true });
+    await expect(enableAutoMergeRebase('t', target)).rejects.toMatchObject({ rejected: false });
+  });
+});
+
+describe('auto-merge eligibility', () => {
+  it.each([
+    [{}, true, ''],
+    [{ id: null }, false, 'Missing pull request ID'],
+    [{ state: 'CLOSED' }, false, 'Not an open'],
+    [{ isDraft: true }, false, 'Not an open'],
+    [{ autoMergeRequest: { mergeMethod: 'REBASE' } }, false, 'already enabled'],
+    [{ autoMergeRequest: { mergeMethod: 'SQUASH' } }, true, '']
+  ])('checks fresh metadata %j without approval restrictions', async (overrides, eligible, reason) => {
+    global.fetch.mockResolvedValue(jsonResponse({ data: { repository: { pullRequest: {
+      id: 'node', state: 'OPEN', isDraft: false, author: { login: 'me' }, ...overrides
+    } } } }));
+    const controller = new AbortController();
+    const result = await fetchAutomergeCandidate('t', { repo: 'o/r', number: 3 }, controller.signal);
+    expect(result).toMatchObject({ repo: 'o/r', number: 3, eligible, reason: expect.stringContaining(reason) });
+    expect(global.fetch.mock.calls[0][1].signal).toBe(controller.signal);
+    expect(JSON.parse(global.fetch.mock.calls[0][1].body).variables).toEqual({ owner: 'o', name: 'r', number: 3 });
   });
 });
 
