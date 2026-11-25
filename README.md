@@ -46,6 +46,9 @@ organisation. Inspired by
 - **Enable auto-merge (rebase) on selected PRs**: merge-icon button in the popup header opens
   a modal for PRs matching the current All/Older filter. Nothing is selected initially; choose
   individual PRs or **Select all eligible PRs**, then **Enable selected** with no extra confirmation.
+  The **PR author** dropdown filters this selection by author. Select all affects only visible
+  eligible PRs; changing author clears any selections that become hidden. The dropdown resets
+  to all authors for a new selection or recheck and does not filter batch results.
   PRs are disabled while fresh eligibility checks run, with a live processed counter. Already-rebase,
   closed/draft, missing-ID and uncheckable PRs remain disabled with a reason. Checks run up to
   four PRs at a time and time out after 20 seconds. Your own and already-approved PRs may be selected.
@@ -65,6 +68,8 @@ organisation. Inspired by
   the current All/Older filter. Nothing is selected initially; choose individual PRs or
   **Select all eligible PRs**, then **Approve selected**. This immediately submits normal
   approvals as the configured token's user, without a comment or another confirmation.
+  The **PR author** dropdown has the same selection, reset, and result-view behavior described
+  for auto-merge above.
   PRs appear immediately but remain disabled while eligibility is checked. A live counter
   shows how many PRs have been processed out of the total (including failed checks). Checks run up to
   four PRs at a time; identity and individual PR checks time out after 20 seconds and display

@@ -24,6 +24,7 @@
       <h2 id="automerge-title">Enable auto-merge (rebase)</h2>
       <p id="automerge-warning">Enables rebase auto-merge and can allow PRs to merge immediately. Other auto-merge methods are disabled first, then switched to rebase. Closing this dialog does not cancel a submitted batch.</p>
       <p id="automerge-message" role="status" aria-live="polite"></p>
+      <label id="automerge-author-label" class="author-filter" hidden>PR author <select id="automerge-author" disabled><option value="">All authors</option></select></label>
       <label id="automerge-select-label"><input id="automerge-select-all" type="checkbox"> Select all eligible PRs</label>
       <div id="automerge-list"></div>
       <footer class="approval-actions">
@@ -41,6 +42,7 @@
       <h2 id="approval-title">Approve pull requests</h2>
       <p id="approval-warning">Approves as your token's user, without a comment. This can allow PRs with auto-merge enabled to merge. Closing this dialog does not cancel a submitted batch.</p>
       <p id="approval-message" role="status" aria-live="polite"></p>
+      <label id="approval-author-label" class="author-filter" hidden>PR author <select id="approval-author" disabled><option value="">All authors</option></select></label>
       <label id="approval-select-label"><input id="approval-select-all" type="checkbox"> Select all eligible PRs</label>
       <div id="approval-list"></div>
       <footer class="approval-actions">

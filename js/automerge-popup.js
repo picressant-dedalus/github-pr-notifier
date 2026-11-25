@@ -1,5 +1,5 @@
 import { ICONS } from './icons.js';
-import { FILTER_ALL, renderApprovalRows, updateApprovalSelection, visiblePullRequests } from './popup-view.js';
+import { FILTER_ALL, filterApprovalRows, populateAuthorFilter, renderApprovalRows, updateApprovalSelection, visibleApprovalInputs, visiblePullRequests } from './popup-view.js';
 import { loadSettings, loadState } from './settings.js';
 
 export function initAutomerge() {
@@ -54,6 +54,7 @@ export function initAutomerge() {
       + (result.refreshError ? ` Refresh failed: ${result.refreshError}` : '')
       + (result.targets.some((target) => target.status === 'uncertain') ? ' Some outcomes are uncertain. Check GitHub before rechecking or retrying.' : '');
     $('select-label').hidden = true;
+    $('author-label').hidden = true;
     $('count').textContent = '';
     $('submit').hidden = true;
     $('retry').hidden = busy || result.targets.every((target) => target.status === 'succeeded');
@@ -80,6 +81,9 @@ export function initAutomerge() {
     $('select-all').checked = false;
     $('select-all').indeterminate = false;
     $('select-all').disabled = true;
+    $('author-label').hidden = false;
+    $('author').disabled = true;
+    $('author').replaceChildren(new Option('All authors', ''));
     $('select-label').hidden = false;
     $('count').textContent = '';
     $('close').textContent = 'Cancel';
@@ -97,6 +101,7 @@ export function initAutomerge() {
       if (current !== generation || !dialog.open) return;
       selection = result;
       rows(result.candidates);
+      populateAuthorFilter(dialog, result.candidates, 'automerge');
       $('message').textContent = result.candidates.some((target) => target.eligible)
         ? 'Select the PRs to enable auto-merge (rebase).' : 'No eligible PRs. See the reasons below.';
       updateSelection();
@@ -144,6 +149,7 @@ export function initAutomerge() {
     batch = null;
     $('list').replaceChildren();
     $('select-label').hidden = true;
+    $('author-label').hidden = true;
     $('count').textContent = '';
     $('submit').hidden = false;
     $('submit').disabled = true;
@@ -173,8 +179,11 @@ export function initAutomerge() {
   });
   $('select-all').addEventListener('change', () => {
     if (busy) return;
-    for (const input of $('list').querySelectorAll('input:not(:disabled)')) input.checked = $('select-all').checked;
+    for (const input of visibleApprovalInputs(dialog, 'automerge')) input.checked = $('select-all').checked;
     updateSelection();
+  });
+  $('author').addEventListener('change', () => {
+    if (!busy && selection) filterApprovalRows(dialog, selection.candidates, 'automerge');
   });
   $('list').addEventListener('change', () => { if (!busy) updateSelection(); });
   $('retry').addEventListener('click', () => {
@@ -195,7 +204,7 @@ export function initAutomerge() {
   $('dismiss').addEventListener('click', () => { if (!busy && batch) dismissResults(batch, $('dismiss')); });
   $('submit').addEventListener('click', async () => {
     if (busy || !selection) return;
-    const targets = [...$('list').querySelectorAll('input:checked:not(:disabled)')]
+    const targets = visibleApprovalInputs(dialog, 'automerge').filter((input) => input.checked)
       .map((input) => selection.candidates[Number(input.dataset.index)])
       .map(({ repo, number }) => ({ repo, number }));
     if (!targets.length) return;
@@ -204,6 +213,7 @@ export function initAutomerge() {
     busy = true;
     $('submit').disabled = true;
     $('select-all').disabled = true;
+    $('author').disabled = true;
     for (const input of $('list').querySelectorAll('input')) input.disabled = true;
     $('message').textContent = 'Submitting auto-merge...';
     try {

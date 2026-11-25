@@ -1,7 +1,7 @@
 // Popup glue: reads settings/state from storage, renders, and asks the worker to refresh.
 
 import { ICONS } from './icons.js';
-import { FILTER_ALL, lastUpdatedText, renderApprovalRows, renderPopup, updateApprovalSelection, visiblePullRequests } from './popup-view.js';
+import { FILTER_ALL, filterApprovalRows, lastUpdatedText, populateAuthorFilter, renderApprovalRows, renderPopup, updateApprovalSelection, visibleApprovalInputs, visiblePullRequests } from './popup-view.js';
 import { STATE_KEY, SETTINGS_KEY, loadSettings, loadState } from './settings.js';
 import { initAutomerge } from './automerge-popup.js';
 
@@ -20,6 +20,8 @@ function initApprovals() {
   const newSelection = document.getElementById('approval-new');
   const dismiss = document.getElementById('approval-dismiss');
   const all = document.getElementById('approval-select-all');
+  const author = document.getElementById('approval-author');
+  const authorLabel = document.getElementById('approval-author-label');
   let selection = null;
   let batch = null;
   let busy = false;
@@ -46,6 +48,7 @@ function initApprovals() {
       + (result.targets.some((target) => target.status === 'uncertain')
         ? ' Some outcomes are uncertain. Check GitHub before rechecking or retrying.' : '');
     document.getElementById('approval-select-label').hidden = true;
+    authorLabel.hidden = true;
     document.getElementById('approval-count').textContent = '';
     submit.hidden = true;
     retry.hidden = busy || result.targets.every((target) => target.status === 'succeeded');
@@ -71,6 +74,9 @@ function initApprovals() {
     all.checked = false;
     all.indeterminate = false;
     all.disabled = true;
+    authorLabel.hidden = false;
+    author.disabled = true;
+    author.replaceChildren(new Option('All authors', ''));
     document.getElementById('approval-select-label').hidden = false;
     document.getElementById('approval-count').textContent = '';
     document.getElementById('approval-close').textContent = 'Cancel';
@@ -89,6 +95,7 @@ function initApprovals() {
       if (current !== generation) return;
       selection = result;
       renderApprovalRows(list, selection.candidates);
+      populateAuthorFilter(dialog, selection.candidates);
       message.textContent = `Approving as ${selection.login}. Select the PRs to approve.`;
       updateApprovalSelection(dialog);
     } catch (error) {
@@ -114,6 +121,7 @@ function initApprovals() {
     batch = null;
     list.replaceChildren();
     document.getElementById('approval-select-label').hidden = true;
+    authorLabel.hidden = true;
     document.getElementById('approval-count').textContent = '';
     document.body.classList.add('approvals-open');
     dialog.showModal();
@@ -187,19 +195,23 @@ function initApprovals() {
   });
   all.addEventListener('change', () => {
     if (busy) return;
-    for (const input of list.querySelectorAll('input:not(:disabled)')) input.checked = all.checked;
+    for (const input of visibleApprovalInputs(dialog)) input.checked = all.checked;
     updateApprovalSelection(dialog);
+  });
+  author.addEventListener('change', () => {
+    if (!busy && selection) filterApprovalRows(dialog, selection.candidates);
   });
   list.addEventListener('change', () => { if (!busy) updateApprovalSelection(dialog); });
   submit.addEventListener('click', async () => {
     if (busy || !selection) return;
-    const targets = [...list.querySelectorAll('input:checked:not(:disabled)')]
+    const targets = visibleApprovalInputs(dialog).filter((input) => input.checked)
       .map((input) => selection.candidates[Number(input.dataset.index)])
       .map(({ repo, number }) => ({ repo, number }));
     if (!targets.length) return;
     busy = true;
     submit.disabled = true;
     all.disabled = true;
+    author.disabled = true;
     for (const input of list.querySelectorAll('input')) input.disabled = true;
     message.textContent = 'Submitting approvals...';
     try {

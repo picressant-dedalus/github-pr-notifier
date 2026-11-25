@@ -57,6 +57,96 @@ async function open() {
   await tick();
 }
 
+it.each([
+  ['approval', 'approve-prs', 'prepare-approvals', 'submit-approvals'],
+  ['automerge', 'automerge-prs', 'prepare-automerge', 'submit-automerge']
+])('filters %s selections by author without submitting hidden PRs', async (prefix, opener, prepareType, submitType) => {
+  const dialog = $(`${prefix}-dialog`);
+  dialog.showModal = function () { this.open = true; };
+  dialog.close = function () { this.open = false; this.dispatchEvent(new Event('close')); };
+  const items = [
+    { repo: 'o/r', number: 1, author: 'Alice', eligible: true },
+    { repo: 'o/r', number: 2, author: 'bob', eligible: true },
+    { repo: 'o/r', number: 3, author: 'ALICE', eligible: true },
+    { repo: 'o/r', number: 4, author: null, eligible: true },
+    { repo: 'o/r', number: 5, author: 'BOB', eligible: false, reason: 'Ineligible' },
+    { repo: 'o/r', number: 6, author: 'Charlie', eligible: false, reason: 'Ineligible' }
+  ];
+  await chrome.storage.local.set({
+    state: { repos: { 'o/r': { pullRequests: items.map((item) => pr(item.number)) } } }
+  });
+  const normal = chrome.runtime.sendMessage.getMockImplementation();
+  let release;
+  let first = true;
+  chrome.runtime.sendMessage.mockImplementation((message) => {
+    if (message.type === prepareType) {
+      const result = { id: 'selection', login: 'me', candidates: items.filter((item) => message.targets.some((target) => target.number === item.number)) };
+      if (first) {
+        first = false;
+        return new Promise((resolve) => { release = () => resolve({ ok: true, result }); });
+      }
+      return Promise.resolve({ ok: true, result });
+    }
+    if (message.type === submitType) return Promise.resolve({
+      ok: true, result: { id: 'batch', selectionId: 'selection', status: 'completed',
+        targets: message.targets.map((target) => ({ ...items.find((item) => item.number === target.number), status: 'failed' })) }
+    });
+    return normal(message);
+  });
+  await initPopup();
+  $(opener).click();
+  await tick();
+  const author = $(`${prefix}-author`);
+  expect(author.disabled).toBe(true);
+  release();
+  await tick();
+  expect(author.disabled).toBe(false);
+  expect([...author.options].map((option) => option.textContent)).toEqual(['All authors', 'Alice', 'bob', 'Charlie', 'Unknown author']);
+  const rows = [...$(`${prefix}-list`).querySelectorAll('.approval-row')];
+  const inputs = rows.map((row) => row.querySelector('input'));
+  const changeAuthor = (value) => { author.value = value; author.dispatchEvent(new Event('change')); };
+  changeAuthor('author:alice');
+  expect(rows.map((row) => row.hidden)).toEqual([false, true, false, true, true, true]);
+  $(`${prefix}-select-all`).click();
+  expect(inputs.map((input) => input.checked)).toEqual([true, false, true, false, false, false]);
+  expect($(`${prefix}-count`).textContent).toBe('2 selected');
+  changeAuthor('');
+  expect(inputs[0].checked && inputs[2].checked).toBe(true);
+  expect($(`${prefix}-select-all`).indeterminate).toBe(true);
+  changeAuthor('author:charlie');
+  expect($(`${prefix}-select-all`).disabled).toBe(true);
+  expect($(`${prefix}-submit`).disabled).toBe(true);
+  expect($(`${prefix}-count`).textContent).toBe('0 selected');
+  changeAuthor('unknown');
+  expect(inputs.every((input) => !input.checked)).toBe(true);
+  $(`${prefix}-select-all`).click();
+  changeAuthor('author:bob');
+  expect(inputs.every((input) => !input.checked)).toBe(true);
+  expect(inputs[4].disabled).toBe(true);
+  $(`${prefix}-select-all`).click();
+  expect(inputs.map((input) => input.checked)).toEqual([false, true, false, false, false, false]);
+  inputs[0].checked = true;
+  $(`${prefix}-submit`).click();
+  await tick();
+  expect(chrome.runtime.sendMessage).toHaveBeenCalledWith({
+    type: submitType, selectionId: 'selection', targets: [{ repo: 'o/r', number: 2 }]
+  });
+  expect($(`${prefix}-author-label`).hidden).toBe(true);
+  $(`${prefix}-retry`).click();
+  await tick();
+  expect(author.value).toBe('');
+  expect([...author.options].map((option) => option.textContent)).toEqual(['All authors', 'bob']);
+  expect($(`${prefix}-list`).querySelector('input').checked).toBe(false);
+  $(`${prefix}-select-all`).click();
+  $(`${prefix}-submit`).click();
+  await tick();
+  $(`${prefix}-new`).click();
+  await tick();
+  expect(author.value).toBe('');
+  expect([...author.options].map((option) => option.textContent)).toEqual(['All authors', 'Alice', 'bob', 'Charlie', 'Unknown author']);
+  expect([...$(`${prefix}-list`).querySelectorAll('input')].every((input) => !input.checked)).toBe(true);
+});
+
 it('starts unchecked, safely renders data and selects only eligible PRs with indeterminate state', async () => {
   await open();
   const inputs = [...$('approval-list').querySelectorAll('input')];

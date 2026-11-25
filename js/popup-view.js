@@ -251,8 +251,46 @@ export function renderApprovalRows(root, candidates, { results = false, prefix =
   });
 }
 
+function authorName(candidate) {
+  return typeof candidate.author === 'string' ? candidate.author : candidate.author && candidate.author.login;
+}
+
+function authorKey(candidate) {
+  const author = authorName(candidate);
+  return author ? `author:${author.toLowerCase()}` : 'unknown';
+}
+
+export function populateAuthorFilter(dialog, candidates, prefix = 'approval') {
+  const select = dialog.querySelector(`#${prefix}-author`);
+  const authors = new Map();
+  for (const candidate of candidates) {
+    const key = authorKey(candidate);
+    if (!authors.has(key)) authors.set(key, key === 'unknown' ? 'Unknown author' : authorName(candidate));
+  }
+  select.replaceChildren(new Option('All authors', ''));
+  for (const [key, name] of [...authors].sort((a, b) => a[1].localeCompare(b[1], undefined, { sensitivity: 'base' }))) {
+    select.add(new Option(name, key));
+  }
+  select.disabled = candidates.length === 0;
+}
+
+export function filterApprovalRows(dialog, candidates, prefix = 'approval') {
+  const value = dialog.querySelector(`#${prefix}-author`).value;
+  for (const row of dialog.querySelectorAll(`#${prefix}-list .approval-row`)) {
+    const input = row.querySelector('input');
+    row.hidden = !!value && authorKey(candidates[Number(input.dataset.index)]) !== value;
+    if (row.hidden) input.checked = false;
+  }
+  updateApprovalSelection(dialog, prefix);
+}
+
+export function visibleApprovalInputs(dialog, prefix = 'approval') {
+  return [...dialog.querySelectorAll(`#${prefix}-list input:not(:disabled)`)]
+    .filter((input) => !input.closest('.approval-row').hidden);
+}
+
 export function updateApprovalSelection(dialog, prefix = 'approval') {
-  const enabled = [...dialog.querySelectorAll(`#${prefix}-list input:not(:disabled)`)];
+  const enabled = visibleApprovalInputs(dialog, prefix);
   const selected = enabled.filter((input) => input.checked);
   const all = dialog.querySelector(`#${prefix}-select-all`);
   all.disabled = enabled.length === 0;
